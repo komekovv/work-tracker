@@ -308,6 +308,28 @@ def get_sessions_by_date(
     return [_row_to_session(r) for r in rows]
 
 
+def get_sessions_between(
+    start: str | date,
+    end: str | date,
+    *,
+    conn: sqlite3.Connection | None = None,
+    db_path: Path | str | None = None,
+) -> list[Session]:
+    """All sessions whose start day is within the inclusive ``[start, end]``.
+
+    Dates are zero-padded ISO, so the lexicographic range matches chronological.
+    """
+    s = cal.to_date(start).isoformat()
+    e = cal.to_date(end).isoformat()
+    with optional_connection(conn, db_path) as c:
+        rows = c.execute(
+            "SELECT * FROM sessions WHERE date BETWEEN ? AND ? "
+            "ORDER BY date, start_time",
+            (s, e),
+        ).fetchall()
+    return [_row_to_session(r) for r in rows]
+
+
 def recover_orphans(
     *,
     conn: sqlite3.Connection | None = None,

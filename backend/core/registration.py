@@ -12,12 +12,19 @@ from backend.core.migrations import CORE_MIGRATIONS
 from backend.core.registry import ModuleRegistration, Registry
 
 
+def _core_router_factory():
+    """Lazily import and return core's router (keeps FastAPI out of import)."""
+    from backend.core.routes import router
+
+    return router
+
+
 def register(registry: Registry) -> None:
-    """Register core's tables (and, later, routes) with the registry."""
+    """Register core's tables and routes with the registry."""
     registry.register(
         ModuleRegistration(
             name="core",
             migrations=CORE_MIGRATIONS,
-            # router_factory added in Phase 4 (settings, day-type routes)
+            router_factory=_core_router_factory,
         )
     )

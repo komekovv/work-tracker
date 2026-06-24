@@ -12,12 +12,19 @@ from backend.core.registry import ModuleRegistration, Registry
 from backend.modules.worktime.models import WORKTIME_MIGRATIONS
 
 
+def _worktime_router_factory():
+    """Lazily import and return the worktime router (keeps FastAPI out of import)."""
+    from backend.modules.worktime.routes import router
+
+    return router
+
+
 def register(registry: Registry) -> None:
-    """Register the worktime module's tables (and, later, routes)."""
+    """Register the worktime module's tables and routes."""
     registry.register(
         ModuleRegistration(
             name="worktime",
             migrations=WORKTIME_MIGRATIONS,
-            # router_factory added in Phase 4
+            router_factory=_worktime_router_factory,
         )
     )
