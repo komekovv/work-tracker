@@ -18,6 +18,6 @@ def register(registry: Registry) -> None:
         ModuleRegistration(
             name="core",
             migrations=CORE_MIGRATIONS,
-            router=None,  # core routes (settings, day-type) added in Phase 4
+            # router_factory added in Phase 4 (settings, day-type routes)
         )
     )

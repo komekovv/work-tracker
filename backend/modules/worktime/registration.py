@@ -18,6 +18,6 @@ def register(registry: Registry) -> None:
         ModuleRegistration(
             name="worktime",
             migrations=WORKTIME_MIGRATIONS,
-            router=None,  # routes added in Phase 4
+            # router_factory added in Phase 4
         )
     )

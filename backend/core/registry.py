@@ -11,23 +11,27 @@ that:
   ``backend/modules/`` that exposes a ``register(registry)`` hook. No edits to
   core or to the API app (open-closed principle).
 
-Design note: the router is stored as a loosely-typed object (``Any``) rather
-than importing FastAPI here. That keeps this module importable with **only the
-standard library**, so the data/registry layer can be exercised before the web
-stack is installed. FastAPI types are validated where routers are actually
-mounted (the API layer, Phase 4).
+Design note: a module contributes its router as a **lazy factory**
+(``router_factory``), not a router instance. The factory is only called by the
+API layer (``api/main.py``) when mounting; merely importing/registering a module
+never imports FastAPI. That keeps the data/registry/detector layers importable
+with **only the standard library** — the detector never needs the web stack.
 """
 
 from __future__ import annotations
 
 import importlib
 import pkgutil
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from backend.core.db import Migration, run_migrations
+
+# A zero-arg callable returning a FastAPI APIRouter. Typed loosely so this
+# module stays FastAPI-free; the API layer validates the real type at mount.
+RouterFactory = Callable[[], Any]
 
 
 @dataclass(frozen=True)
@@ -36,13 +40,13 @@ class ModuleRegistration:
 
     - ``name``: unique identifier (also the log/label name).
     - ``migrations``: idempotent migrations owned by this unit, run in order.
-    - ``router``: a FastAPI ``APIRouter`` (typed loosely; mounted in Phase 4).
-      ``None`` for units that contribute only tables.
+    - ``router_factory``: a callable returning the unit's FastAPI ``APIRouter``,
+      invoked only at mount time (Phase 4). ``None`` for units with no routes.
     """
 
     name: str
     migrations: tuple[Migration, ...] = ()
-    router: Any | None = None
+    router_factory: RouterFactory | None = None
 
 
 class Registry:
@@ -75,10 +79,14 @@ class Registry:
             yield from reg.migrations
 
     def routers(self) -> Iterator[tuple[str, Any]]:
-        """``(name, router)`` for every registration that has a router."""
+        """``(name, router)`` for each registration, building routers lazily.
+
+        Calling this imports the units' route modules (and thus FastAPI), so
+        only the API layer should iterate it — not the detector.
+        """
         for reg in self._registrations.values():
-            if reg.router is not None:
-                yield reg.name, reg.router
+            if reg.router_factory is not None:
+                yield reg.name, reg.router_factory()
 
     def init_db(self, db_path: Path | str | None = None) -> None:
         """Run all registered migrations against the database."""
