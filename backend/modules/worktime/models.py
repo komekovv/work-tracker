@@ -330,6 +330,124 @@ def get_sessions_between(
     return [_row_to_session(r) for r in rows]
 
 
+# Sentinel "end" for an open session when testing interval overlap: an open
+# session occupies [start, ∞), so it overlaps anything starting after it.
+_OPEN_END_SENTINEL = "9999-12-31T23:59:59"
+
+
+def find_overlapping(
+    start: datetime,
+    end: datetime,
+    *,
+    exclude_id: int | None = None,
+    conn: sqlite3.Connection | None = None,
+    db_path: Path | str | None = None,
+) -> list[Session]:
+    """Sessions whose time interval overlaps ``[start, end]`` (case B6).
+
+    Uses strict inequalities so back-to-back sessions (one ends exactly when the
+    next begins) do **not** count as overlapping. Open sessions are treated as
+    ongoing via a sentinel end. ``exclude_id`` skips a row (used when editing).
+    """
+    start_iso, end_iso = _iso(start), _iso(end)
+    sql = (
+        "SELECT * FROM sessions "
+        "WHERE start_time < ? "
+        f"AND COALESCE(end_time, '{_OPEN_END_SENTINEL}') > ?"
+    )
+    params: list[object] = [end_iso, start_iso]
+    if exclude_id is not None:
+        sql += " AND id != ?"
+        params.append(exclude_id)
+    with optional_connection(conn, db_path) as c:
+        rows = c.execute(sql + " ORDER BY start_time", params).fetchall()
+    return [_row_to_session(r) for r in rows]
+
+
+def create_session(
+    start: datetime,
+    end: datetime,
+    *,
+    source: str = "manual",
+    conn: sqlite3.Connection | None = None,
+    db_path: Path | str | None = None,
+) -> int:
+    """Insert a fully-specified (closed) session and return its id.
+
+    Used for manual clock-in/out. Caller is responsible for overlap checks
+    (see :func:`find_overlapping`).
+    """
+    start_iso, end_iso = _iso(start), _iso(end)
+    with optional_connection(conn, db_path) as c:
+        cur = c.execute(
+            """
+            INSERT INTO sessions
+                (date, start_time, end_time, duration_minutes, is_sunday, source)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                start.date().isoformat(),
+                start_iso,
+                end_iso,
+                duration_minutes_between(start_iso, end_iso),
+                1 if cal.is_sunday(start.date()) else 0,
+                source,
+            ),
+        )
+        return int(cur.lastrowid)
+
+
+def edit_session(
+    session_id: int,
+    *,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    conn: sqlite3.Connection | None = None,
+    db_path: Path | str | None = None,
+) -> Session | None:
+    """Update a session's start and/or end; recompute derived fields.
+
+    Returns the updated `Session`, or `None` if the id doesn't exist. If the
+    final session is still open (no end), `duration_minutes` stays NULL.
+    Changing the start re-derives `date` and `is_sunday` (start-day attribution).
+    """
+    with optional_connection(conn, db_path) as c:
+        existing = c.execute(
+            "SELECT * FROM sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        if existing is None:
+            return None
+
+        start_iso = _iso(start) if start is not None else existing["start_time"]
+        if end is not None:
+            end_iso: str | None = _iso(end)
+        else:
+            end_iso = existing["end_time"]
+
+        start_date = datetime.fromisoformat(start_iso).date()
+        duration = (
+            duration_minutes_between(start_iso, end_iso)
+            if end_iso is not None
+            else None
+        )
+        c.execute(
+            "UPDATE sessions SET start_time = ?, end_time = ?, "
+            "duration_minutes = ?, date = ?, is_sunday = ? WHERE id = ?",
+            (
+                start_iso,
+                end_iso,
+                duration,
+                start_date.isoformat(),
+                1 if cal.is_sunday(start_date) else 0,
+                session_id,
+            ),
+        )
+        row = c.execute(
+            "SELECT * FROM sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+    return _row_to_session(row)
+
+
 def recover_orphans(
     *,
     conn: sqlite3.Connection | None = None,
@@ -463,6 +581,20 @@ def list_targets(
             "SELECT * FROM targets ORDER BY effective_from, weekday, id"
         ).fetchall()
     return [_row_to_target(r) for r in rows]
+
+
+def get_target(
+    target_id: int,
+    *,
+    conn: sqlite3.Connection | None = None,
+    db_path: Path | str | None = None,
+) -> Target | None:
+    """Fetch a target rule by id, or None."""
+    with optional_connection(conn, db_path) as c:
+        row = c.execute(
+            "SELECT * FROM targets WHERE id = ?", (target_id,)
+        ).fetchone()
+    return _row_to_target(row) if row is not None else None
 
 
 def delete_target(

@@ -7,7 +7,45 @@ them via `from_attributes`, so the API shape tracks the domain types.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from datetime import date, datetime
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class ManualSessionIn(BaseModel):
+    """Request body for a manual clock-in/out (both ends required)."""
+
+    start_time: datetime
+    end_time: datetime
+
+
+class SessionEditIn(BaseModel):
+    """Partial edit of a session — supply start, end, or both."""
+
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+
+
+class TargetIn(BaseModel):
+    """Request body for setting/changing a target rule."""
+
+    effective_from: date
+    daily_hours: float = Field(ge=0)
+    period: Literal["daily", "weekly"] = "daily"
+    weekday: int | None = Field(default=None, ge=0, le=6)
+
+
+class TargetOut(BaseModel):
+    """A stored target rule."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    effective_from: str
+    period: str
+    weekday: int | None
+    daily_hours: float
 
 
 class SessionOut(BaseModel):

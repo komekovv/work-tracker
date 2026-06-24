@@ -23,9 +23,13 @@ from backend.modules.worktime.schemas import (
     ComparisonOut,
     DayResultOut,
     KpiOut,
+    ManualSessionIn,
     PeriodStatsOut,
+    SessionEditIn,
     SessionOut,
     StatsOut,
+    TargetIn,
+    TargetOut,
     TodayOut,
 )
 
@@ -157,3 +161,84 @@ def calendar(
             for d in cal.iter_days(first, last)
         ]
     return CalendarOut(month=first.strftime("%Y-%m"), days=days)
+
+
+def _conflict_detail(conflicts: list) -> str:
+    ids = ", ".join(str(s.id) for s in conflicts)
+    return f"Session overlaps existing session(s): {ids}"
+
+
+@router.post("/sessions/manual", response_model=SessionOut, status_code=201)
+def create_manual_session(
+    payload: ManualSessionIn,
+    db_path: Path = Depends(get_db_path),
+) -> SessionOut:
+    """Add a manual session (clock-in/out). Rejects overlaps (B6) with 409."""
+    if payload.start_time >= payload.end_time:
+        raise HTTPException(status_code=422, detail="start_time must be before end_time")
+    with core_db.connection(db_path) as conn:
+        conflicts = models.find_overlapping(
+            payload.start_time, payload.end_time, conn=conn
+        )
+        if conflicts:
+            raise HTTPException(status_code=409, detail=_conflict_detail(conflicts))
+        session_id = models.create_session(
+            payload.start_time, payload.end_time, source="manual", conn=conn
+        )
+        created = models.get_session(session_id, conn=conn)
+    return SessionOut.model_validate(created)
+
+
+@router.patch("/sessions/{session_id}", response_model=SessionOut)
+def edit_session(
+    session_id: int,
+    payload: SessionEditIn,
+    db_path: Path = Depends(get_db_path),
+) -> SessionOut:
+    """Edit a session's start/end (e.g. fix a crash day). 404/409 as needed."""
+    with core_db.connection(db_path) as conn:
+        existing = models.get_session(session_id, conn=conn)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        new_start = payload.start_time or datetime.fromisoformat(existing.start_time)
+        if payload.end_time is not None:
+            new_end: datetime | None = payload.end_time
+        elif existing.end_time is not None:
+            new_end = datetime.fromisoformat(existing.end_time)
+        else:
+            new_end = None
+
+        if new_end is not None and new_start >= new_end:
+            raise HTTPException(status_code=422, detail="start_time must be before end_time")
+
+        # Open sessions extend to +∞ for overlap purposes.
+        overlap_end = new_end or datetime.max.replace(microsecond=0)
+        conflicts = models.find_overlapping(
+            new_start, overlap_end, exclude_id=session_id, conn=conn
+        )
+        if conflicts:
+            raise HTTPException(status_code=409, detail=_conflict_detail(conflicts))
+
+        updated = models.edit_session(
+            session_id, start=payload.start_time, end=payload.end_time, conn=conn
+        )
+    return SessionOut.model_validate(updated)
+
+
+@router.post("/target", response_model=TargetOut, status_code=201)
+def set_target(
+    payload: TargetIn,
+    db_path: Path = Depends(get_db_path),
+) -> TargetOut:
+    """Create or change a target rule (historical; replace-on-same-key)."""
+    with core_db.connection(db_path) as conn:
+        target_id = models.set_target(
+            payload.effective_from,
+            payload.daily_hours,
+            period=payload.period,
+            weekday=payload.weekday,
+            conn=conn,
+        )
+        created = models.get_target(target_id, conn=conn)
+    return TargetOut.model_validate(created)
