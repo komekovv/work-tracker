@@ -80,6 +80,25 @@ def connection(db_path: Path | str | None = None) -> Iterator[sqlite3.Connection
         conn.close()
 
 
+@contextmanager
+def optional_connection(
+    conn: sqlite3.Connection | None = None, db_path: Path | str | None = None
+) -> Iterator[sqlite3.Connection]:
+    """Yield the caller's connection, or a self-managed one if none is given.
+
+    When ``conn`` is provided it is yielded as-is and the caller keeps ownership
+    of commit/close (so several operations can share one transaction). When it
+    is ``None``, a fresh connection is opened via :func:`connection` and
+    committed/closed on exit. Used by the higher-level core helpers (config,
+    day_types) so they all compose the same way.
+    """
+    if conn is not None:
+        yield conn
+    else:
+        with connection(db_path) as owned:
+            yield owned
+
+
 def run_migrations(
     migrations: Iterable[Migration], db_path: Path | str | None = None
 ) -> None:

@@ -21,29 +21,14 @@ function opens, commits, and closes its own connection via ``db.connection``.
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from backend.core import db
+from backend.core.db import optional_connection as _conn_ctx
 
 # Recognised textual forms for boolean settings (case-insensitive).
 _TRUE_TOKENS = {"1", "true", "yes", "on"}
 _FALSE_TOKENS = {"0", "false", "no", "off"}
-
-
-@contextmanager
-def _conn_ctx(
-    conn: sqlite3.Connection | None, db_path: Path | str | None
-) -> Iterator[sqlite3.Connection]:
-    """Use the caller's connection if given (caller owns commit/close),
-    otherwise open a self-managed one."""
-    if conn is not None:
-        yield conn
-    else:
-        with db.connection(db_path) as owned:
-            yield owned
 
 
 def _to_text(value: Any) -> str:
