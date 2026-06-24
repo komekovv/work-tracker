@@ -1,6 +1,34 @@
-import { Card } from "@/components/ui/card";
+"use client";
+
+import { Heatmap } from "@/components/modules/worktime/heatmap";
+import { KpiCards } from "@/components/modules/worktime/kpi-cards";
+import { TodayCard } from "@/components/modules/worktime/today-card";
+import { TrendChart } from "@/components/modules/worktime/trend-chart";
+import { ErrorState } from "@/components/ui/error-state";
+import { Skeleton } from "@/components/ui/skeleton";
+import { getKpi, getToday } from "@/lib/api";
+import { useApi } from "@/lib/use-api";
+
+function DashboardSkeleton() {
+  return (
+    <div className="space-y-4">
+      <Skeleton className="h-28 w-full" />
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Skeleton key={i} className="h-28 w-full" />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function Home() {
+  const kpi = useApi(getKpi);
+  const today = useApi(getToday);
+
+  const loading = kpi.loading || today.loading;
+  const error = kpi.error ?? today.error;
+
   return (
     <section className="space-y-6">
       <div>
@@ -10,23 +38,26 @@ export default function Home() {
         </p>
       </div>
 
-      <Card className="p-6">
-        <p className="text-sm text-muted-foreground">
-          KPI cards, heatmap, and trend chart arrive next.
-        </p>
-        {/* Token swatches confirm the theme system is wired (temporary). */}
-        <div className="mt-4 flex items-center gap-3 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1.5">
-            <span className="h-3 w-3 rounded-full bg-target" /> target
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-3 w-3 rounded-full bg-bonus" /> bonus
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-3 w-3 rounded-full bg-leave" /> leave
-          </span>
+      {loading ? (
+        <DashboardSkeleton />
+      ) : error ? (
+        <ErrorState
+          message={error}
+          onRetry={() => {
+            kpi.reload();
+            today.reload();
+          }}
+        />
+      ) : (
+        <div className="space-y-4">
+          {today.data && <TodayCard today={today.data} />}
+          {kpi.data && <KpiCards kpi={kpi.data} />}
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Heatmap />
+            <TrendChart />
+          </div>
         </div>
-      </Card>
+      )}
     </section>
   );
 }

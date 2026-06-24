@@ -28,7 +28,10 @@ export function Header() {
 
           <nav className="flex items-center gap-1">
             {modules.map((m) => {
-              const active = pathname === m.href;
+              const active =
+                m.href === "/"
+                  ? pathname === "/"
+                  : pathname.startsWith(m.href);
               return (
                 <Link
                   key={m.id}
