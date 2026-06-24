@@ -1,0 +1,8 @@
+# Work-Time & KPI Tracker — backend dependencies
+#
+# FastAPI 0.x uses 0.x semver: minor releases may introduce breaking
+# changes, so the version range is pinned narrowly (mandatory).
+# The [standard] extra pulls in Uvicorn and the rest of the serving
+# stack; Pydantic v2 comes with FastAPI. SQLite uses the stdlib
+# `sqlite3`, so it is not listed here.
+fastapi[standard]>=0.136.1,<0.137.0

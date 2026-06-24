@@ -1,3 +1,8 @@
+# Work-Tracker runtime SQLite DB (WAL mode creates -wal / -shm sidecars)
+backend/data/app.db
+backend/data/app.db-wal
+backend/data/app.db-shm
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
