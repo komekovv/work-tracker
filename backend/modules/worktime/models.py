@@ -342,3 +342,114 @@ def recover_orphans(
             )
             recovered.append(row["id"])
     return recovered
+
+
+# ===========================================================================
+# Target data access
+# ===========================================================================
+#
+# Targets are **historical, append-by-date** rules. Each row is effective from a
+# date, optionally scoped to a weekday ("short days"). This layer only stores
+# and lists them; deciding which row applies to a given day (the most recent
+# effective_from on/before the day, weekday override beating the base — cases
+# A1–A4) is the calc layer's job (Phase 3).
+
+
+@dataclass(frozen=True)
+class Target:
+    """A row from the `targets` table.
+
+    `weekday` is None for the base (all-days) rule, or 0–6 (Mon=0…Sun=6) for a
+    per-weekday override.
+    """
+
+    id: int
+    effective_from: str
+    period: str
+    weekday: int | None
+    daily_hours: float
+
+
+def _row_to_target(row: sqlite3.Row) -> Target:
+    return Target(
+        id=row["id"],
+        effective_from=row["effective_from"],
+        period=row["period"],
+        weekday=row["weekday"],
+        daily_hours=row["daily_hours"],
+    )
+
+
+def set_target(
+    effective_from: str | date,
+    daily_hours: float,
+    *,
+    period: str = "daily",
+    weekday: int | None = None,
+    conn: sqlite3.Connection | None = None,
+    db_path: Path | str | None = None,
+) -> int:
+    """Create (or replace) a target rule and return its id.
+
+    Re-setting the same `(effective_from, period, weekday)` key replaces that
+    rule (so corrections don't leave ambiguous duplicates); a different
+    `effective_from` adds a new historical row (case A1 — past days keep their
+    old target).
+    """
+    if period not in TARGET_PERIODS:
+        raise ValueError(f"Unknown period {period!r}; expected one of {TARGET_PERIODS}")
+    if weekday is not None:
+        if isinstance(weekday, bool) or not isinstance(weekday, int):
+            raise TypeError("weekday must be an int 0-6 or None")
+        if not 0 <= weekday <= 6:
+            raise ValueError(f"weekday out of range: {weekday}")
+    if daily_hours < 0:
+        raise ValueError(f"daily_hours must be >= 0, got {daily_hours}")
+
+    eff = cal.to_date(effective_from).isoformat()
+    with optional_connection(conn, db_path) as c:
+        # Replace any existing rule with the same key (NULL weekday handled
+        # explicitly since NULL != NULL in SQL).
+        if weekday is None:
+            c.execute(
+                "DELETE FROM targets WHERE effective_from = ? AND period = ? "
+                "AND weekday IS NULL",
+                (eff, period),
+            )
+        else:
+            c.execute(
+                "DELETE FROM targets WHERE effective_from = ? AND period = ? "
+                "AND weekday = ?",
+                (eff, period, weekday),
+            )
+        cur = c.execute(
+            "INSERT INTO targets (effective_from, period, weekday, daily_hours) "
+            "VALUES (?, ?, ?, ?)",
+            (eff, period, weekday, daily_hours),
+        )
+        return int(cur.lastrowid)
+
+
+def list_targets(
+    *,
+    conn: sqlite3.Connection | None = None,
+    db_path: Path | str | None = None,
+) -> list[Target]:
+    """All target rules, ordered by effective_from then weekday (base first)."""
+    with optional_connection(conn, db_path) as c:
+        rows = c.execute(
+            "SELECT * FROM targets ORDER BY effective_from, weekday, id"
+        ).fetchall()
+    return [_row_to_target(r) for r in rows]
+
+
+def delete_target(
+    target_id: int,
+    *,
+    conn: sqlite3.Connection | None = None,
+    db_path: Path | str | None = None,
+) -> bool:
+    """Delete a target rule by id. Returns True if a row was removed."""
+    with optional_connection(conn, db_path) as c:
+        cur = c.execute("DELETE FROM targets WHERE id = ?", (target_id,))
+        return cur.rowcount > 0
