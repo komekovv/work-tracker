@@ -1,26 +1,94 @@
 @import "tailwindcss";
 
+/*
+ * Manual dark mode: override Tailwind v4's default (prefers-color-scheme) so the
+ * `dark:` variant keys off a `.dark` class on <html>. The ThemeProvider (Step 3)
+ * sets that class; we still seed from prefers-color-scheme on first load.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Light theme tokens (semantic; color carries meaning per the design brief). */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f7f8fa;
+  --foreground: #1a1d24;
+
+  --card: #ffffff;
+  --card-foreground: #1a1d24;
+
+  --muted: #eceef2;
+  --muted-foreground: #5b6472;
+
+  --border: #e2e5ea;
+  --ring: #4f46e5;
+
+  --primary: #4f46e5;
+  --primary-foreground: #ffffff;
+
+  /* Worktime semantics: green = target (soft=under, strong=met),
+     blue = bonus, gray = leave/vacation. */
+  --target: #16a34a;
+  --target-soft: #bbf7d0;
+  --bonus: #2563eb;
+  --leave: #94a3b8;
 }
 
+.dark {
+  --background: #0b0e14;
+  --foreground: #e6e8ec;
+
+  --card: #141925;
+  --card-foreground: #e6e8ec;
+
+  --muted: #1b2230;
+  --muted-foreground: #9aa4b2;
+
+  --border: #232b3a;
+  --ring: #818cf8;
+
+  --primary: #818cf8;
+  --primary-foreground: #0b0e14;
+
+  --target: #22c55e;
+  --target-soft: #14532d;
+  --bonus: #3b82f6;
+  --leave: #64748b;
+}
+
+/* Expose the tokens to Tailwind utilities (bg-card, text-muted-foreground,
+   bg-target, border-border, ring-ring, …). */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-target: var(--target);
+  --color-target-soft: var(--target-soft);
+  --color-bonus: var(--bonus);
+  --color-leave: var(--leave);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Accessibility: respect reduced-motion (design brief quality bar). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

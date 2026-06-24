@@ -12,6 +12,7 @@ Run the server with:
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -67,4 +68,5 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
 
 # Module-level app for `uvicorn backend.api.main:app`. Building the app does not
 # touch the database — migrations run on startup (lifespan), not at import.
-app = create_app()
+# Honours WORKTIME_DB_PATH (same override the detector uses) for the DB location.
+app = create_app(os.environ.get("WORKTIME_DB_PATH") or None)
