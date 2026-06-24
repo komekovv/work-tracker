@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from backend.core import calendar as cal
@@ -100,6 +100,139 @@ def period_stats(
         days_counted=days_counted,
         days_met=days_met,
         average_worked_minutes=average_worked,
+    )
+
+
+def streak(
+    as_of: str | date | None = None,
+    *,
+    conn: sqlite3.Connection | None = None,
+    db_path: Path | str | None = None,
+) -> int:
+    """Count consecutive target-met days ending at ``as_of`` (default today).
+
+    Walking backwards (case D3):
+
+    - Days with **no requirement** — bonus days (Sunday/holiday/leave/vacation)
+      *and* days whose resolved target is 0 — are **skipped**: they neither
+      count nor break the run. This is why leave/vacation don't break a streak,
+      and why pre-target history can't inflate it.
+    - A day that **met** its (>0) target adds to the streak.
+    - The first day that **missed** its target ends the streak.
+
+    The scan is bounded below by the earliest recorded session, so it always
+    terminates; with no sessions the streak is 0.
+    """
+    with optional_connection(conn, db_path) as c:
+        row = c.execute("SELECT MIN(date) AS d FROM sessions").fetchone()
+        earliest = row["d"]
+        if earliest is None:
+            return 0
+        earliest_d = cal.to_date(earliest)
+        day = cal.to_date(as_of) if as_of is not None else date.today()
+
+        count = 0
+        while day >= earliest_d:
+            r = calc.compute_day(day, conn=c)
+            if r.target_minutes == 0:  # no requirement → skip, don't break
+                day -= timedelta(days=1)
+                continue
+            if r.target_met:
+                count += 1
+                day -= timedelta(days=1)
+            else:
+                break
+    return count
+
+
+def _period_bounds(
+    period: str,
+    anchor: date,
+    conn: sqlite3.Connection | None,
+    db_path: Path | str | None,
+) -> tuple[date, date]:
+    """Inclusive bounds of the week/month containing ``anchor``."""
+    if period == "week":
+        return cal.week_bounds(anchor, conn=conn, db_path=db_path)
+    if period == "month":
+        return cal.month_bounds(anchor)
+    raise ValueError("period must be 'week' or 'month'")
+
+
+def trend(
+    period: str = "week",
+    n: int = 6,
+    as_of: str | date | None = None,
+    *,
+    conn: sqlite3.Connection | None = None,
+    db_path: Path | str | None = None,
+) -> list[PeriodStats]:
+    """The last ``n`` consecutive periods up to ``as_of``, oldest first."""
+    anchor = cal.to_date(as_of) if as_of is not None else date.today()
+    series: list[PeriodStats] = []
+    with optional_connection(conn, db_path) as c:
+        start, _ = _period_bounds(period, anchor, c, db_path)
+        for _ in range(max(0, n)):
+            p_start, p_end = _period_bounds(period, start, c, db_path)
+            series.append(period_stats(p_start, p_end, conn=c))
+            start = p_start - timedelta(days=1)  # step into the previous period
+    series.reverse()
+    return series
+
+
+@dataclass(frozen=True)
+class Comparison:
+    """Current period vs the immediately preceding one (case D2)."""
+
+    period: str
+    current: PeriodStats
+    previous: PeriodStats
+    worked_diff_minutes: int          # current - previous
+    completion_diff_pct: float | None  # points, None if either side has none
+    pct_change: float | None           # worked % change, None if no prior data
+    has_prior: bool                    # did the previous period have any work?
+
+
+def compare(
+    period: str = "month",
+    as_of: str | date | None = None,
+    *,
+    conn: sqlite3.Connection | None = None,
+    db_path: Path | str | None = None,
+) -> Comparison:
+    """Compare the current period to the previous one.
+
+    Safe when there is no prior data (case D2): `pct_change` is `None` and
+    `has_prior` is `False` rather than raising.
+    """
+    anchor = cal.to_date(as_of) if as_of is not None else date.today()
+    with optional_connection(conn, db_path) as c:
+        cur_start, cur_end = _period_bounds(period, anchor, c, db_path)
+        prev_start, prev_end = _period_bounds(
+            period, cur_start - timedelta(days=1), c, db_path
+        )
+        current = period_stats(cur_start, cur_end, conn=c)
+        previous = period_stats(prev_start, prev_end, conn=c)
+
+    worked_diff = current.worked_minutes - previous.worked_minutes
+    has_prior = previous.worked_minutes > 0
+    pct_change = (
+        round(worked_diff / previous.worked_minutes * 100, 1) if has_prior else None
+    )
+    completion_diff = (
+        round(current.completion_pct - previous.completion_pct, 1)
+        if current.completion_pct is not None and previous.completion_pct is not None
+        else None
+    )
+
+    return Comparison(
+        period=period,
+        current=current,
+        previous=previous,
+        worked_diff_minutes=worked_diff,
+        completion_diff_pct=completion_diff,
+        pct_change=pct_change,
+        has_prior=has_prior,
     )
 
 
