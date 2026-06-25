@@ -44,7 +44,9 @@ def _mount_static(app: FastAPI, static_dir: Path) -> None:
     """
     base = static_dir.resolve()
 
-    @app.get("/{full_path:path}", include_in_schema=False)
+    # GET and HEAD: clients (and Next.js route prefetch) issue HEAD requests;
+    # without HEAD the catch-all would 405 them.
+    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
     def serve_static(full_path: str) -> FileResponse:
         if full_path in ("", "/"):
             return FileResponse(base / "index.html")
