@@ -26,7 +26,7 @@ export function Header() {
             </span>
           </Link>
 
-          <nav className="flex items-center gap-1">
+          <nav className="hidden items-center gap-1 sm:flex">
             {modules.map((m) => {
               const active =
                 m.href === "/"

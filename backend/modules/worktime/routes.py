@@ -12,7 +12,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from backend.api.deps import get_db_path
 from backend.core import calendar as cal
@@ -91,10 +91,11 @@ def stats(
     """Current period totals plus the last ``n`` periods as a trend."""
     anchor = as_of or date.today()
     with core_db.connection(db_path) as conn:
+        # Cap the current period at the anchor → week/month-to-date.
         if period == "week":
-            current = kpi.week_stats(anchor, conn=conn)
+            current = kpi.week_stats(anchor, as_of=anchor, conn=conn)
         else:
-            current = kpi.month_stats(anchor, conn=conn)
+            current = kpi.month_stats(anchor, as_of=anchor, conn=conn)
         trend = kpi.trend(period, n, anchor, conn=conn)
 
     return StatsOut(
@@ -113,7 +114,7 @@ def kpi_metrics(
     """Headline KPIs: streak, current month stats, month-over-month comparison."""
     anchor = as_of or date.today()
     with core_db.connection(db_path) as conn:
-        month = kpi.month_stats(anchor, conn=conn)
+        month = kpi.month_stats(anchor, as_of=anchor, conn=conn)  # month-to-date
         streak = kpi.streak(anchor, conn=conn)
         comparison = kpi.compare("month", anchor, conn=conn)
 
@@ -242,3 +243,21 @@ def set_target(
         )
         created = models.get_target(target_id, conn=conn)
     return TargetOut.model_validate(created)
+
+
+@router.get("/targets", response_model=list[TargetOut])
+def list_targets(db_path: Path = Depends(get_db_path)) -> list[TargetOut]:
+    """All target rules (for the settings UI)."""
+    rows = models.list_targets(db_path=db_path)
+    return [TargetOut.model_validate(t) for t in rows]
+
+
+@router.delete("/target/{target_id}", status_code=204)
+def delete_target(
+    target_id: int,
+    db_path: Path = Depends(get_db_path),
+) -> Response:
+    """Delete a target rule by id; 404 if it doesn't exist."""
+    if not models.delete_target(target_id, db_path=db_path):
+        raise HTTPException(status_code=404, detail="Target not found")
+    return Response(status_code=204)

@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
 import { Header } from "@/components/header";
+import { MobileTabBar } from "@/components/mobile-tab-bar";
 import {
   NO_FLASH_SCRIPT,
   ThemeProvider,
@@ -41,9 +42,10 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: NO_FLASH_SCRIPT }} />
         <ThemeProvider>
           <Header />
-          <div className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
+          <div className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 pb-24 sm:pb-6">
             {children}
           </div>
+          <MobileTabBar />
         </ThemeProvider>
       </body>
     </html>

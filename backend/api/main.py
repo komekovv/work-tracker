@@ -16,8 +16,9 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from backend.core.db import DB_PATH
 from backend.core.registry import Registry, load_all
@@ -25,8 +26,46 @@ from backend.core.registry import Registry, load_all
 logger = logging.getLogger("api")
 
 # Dev origins for the Next.js dev server. In production the static export is
-# served same-origin by FastAPI (Phase 7), so CORS is mainly a dev convenience.
+# served same-origin by FastAPI, so CORS is mainly a dev convenience.
 _DEV_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+# The built frontend (`frontend/out`), resolved relative to the repo root.
+# Overridable via WORKTIME_STATIC_DIR.
+_DEFAULT_STATIC_DIR = Path(__file__).resolve().parents[2] / "frontend" / "out"
+
+
+def _mount_static(app: FastAPI, static_dir: Path) -> None:
+    """Serve the Next.js static export, mapping clean routes to its files.
+
+    The export produces flat `<route>.html` files (e.g. `worktime.html`,
+    `worktime/settings.html`), so a custom resolver maps `/worktime` →
+    `worktime.html`. Registered last, so the `/api/*` routers and `/health`
+    always take precedence.
+    """
+    base = static_dir.resolve()
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def serve_static(full_path: str) -> FileResponse:
+        if full_path in ("", "/"):
+            return FileResponse(base / "index.html")
+
+        target = (base / full_path).resolve()
+        # Guard against path traversal outside the static root.
+        if base not in target.parents and target != base:
+            raise HTTPException(status_code=404)
+
+        if target.is_file():  # an asset: _next/..., favicon.ico, *.svg
+            return FileResponse(target)
+
+        route_html = base / f"{full_path}.html"  # /worktime → worktime.html
+        if route_html.is_file():
+            return FileResponse(route_html)
+
+        index_html = target / "index.html"  # directory index, if any
+        if index_html.is_file():
+            return FileResponse(index_html)
+
+        return FileResponse(base / "404.html", status_code=404)
 
 
 @asynccontextmanager
@@ -62,6 +101,16 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
     @app.get("/health", tags=["meta"])
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    # Serve the built frontend same-origin, if present. Skipped in dev (where
+    # `next dev` serves the UI and `out/` doesn't exist). Mounted last so it
+    # never shadows the API routes.
+    static_dir = Path(
+        os.environ.get("WORKTIME_STATIC_DIR") or _DEFAULT_STATIC_DIR
+    )
+    if static_dir.is_dir():
+        _mount_static(app, static_dir)
+        logger.info("Serving static frontend from %s", static_dir)
 
     return app
 

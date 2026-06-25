@@ -10,14 +10,25 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from backend.api.deps import get_db_path
 from backend.core import config, day_types
 from backend.core import db as core_db
+from backend.core.day_types import DayType
 from backend.core.schemas import DayTypeIn, DayTypeOut
 
 router = APIRouter(prefix="/api", tags=["core"])
+
+
+def _to_out(marking: DayType) -> DayTypeOut:
+    return DayTypeOut(
+        date=marking.date,
+        type=marking.type,
+        name=marking.name,
+        planned=marking.planned,
+        affects_target=marking.affects_target,
+    )
 
 
 @router.get("/settings")
@@ -52,13 +63,18 @@ def set_day_type(
         affects_target=payload.affects_target,
         db_path=db_path,
     )
-    return DayTypeOut(
-        date=marking.date,
-        type=marking.type,
-        name=marking.name,
-        planned=marking.planned,
-        affects_target=marking.affects_target,
-    )
+    return _to_out(marking)
+
+
+@router.get("/day-types", response_model=list[DayTypeOut])
+def list_day_types(
+    start: date = Query(alias="from"),
+    end: date = Query(alias="to"),
+    db_path: Path = Depends(get_db_path),
+) -> list[DayTypeOut]:
+    """Day-type markings within an inclusive [from, to] range."""
+    rows = day_types.list_day_types(start, end, db_path=db_path)
+    return [_to_out(r) for r in rows]
 
 
 @router.delete("/day-type/{day}", status_code=204)

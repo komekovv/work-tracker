@@ -1,4 +1,5 @@
-import { Card } from "@/components/ui/card";
+import { GeneralSettings } from "@/components/settings/general-settings";
+import { ThemeControl } from "@/components/settings/theme-control";
 
 export default function SettingsPage() {
   return (
@@ -10,11 +11,8 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      <Card className="p-6">
-        <p className="text-sm text-muted-foreground">
-          Theme and dynamic settings arrive in a later step.
-        </p>
-      </Card>
+      <ThemeControl />
+      <GeneralSettings />
     </section>
   );
 }

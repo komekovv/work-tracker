@@ -47,12 +47,22 @@ def period_stats(
     start: str | date,
     end: str | date,
     *,
+    as_of: str | date | None = None,
     conn: sqlite3.Connection | None = None,
     db_path: Path | str | None = None,
 ) -> PeriodStats:
-    """Aggregate `compute_day` over the inclusive ``[start, end]`` range."""
+    """Aggregate `compute_day` over the inclusive ``[start, end]`` range.
+
+    If ``as_of`` is given and falls before ``end``, the range is capped at it —
+    this yields month-/week-to-date stats for the *current* period while leaving
+    past periods (whose end is already <= as_of) unaffected.
+    """
     start_d = cal.to_date(start)
     end_d = cal.to_date(end)
+    if as_of is not None:
+        cap = cal.to_date(as_of)
+        if cap < end_d:
+            end_d = cap
 
     days = 0
     worked = 0
@@ -174,7 +184,9 @@ def trend(
         start, _ = _period_bounds(period, anchor, c, db_path)
         for _ in range(max(0, n)):
             p_start, p_end = _period_bounds(period, start, c, db_path)
-            series.append(period_stats(p_start, p_end, conn=c))
+            # Cap at the anchor so the latest (current) period is to-date; past
+            # periods end before the anchor and are unaffected.
+            series.append(period_stats(p_start, p_end, as_of=anchor, conn=c))
             start = p_start - timedelta(days=1)  # step into the previous period
     series.reverse()
     return series
@@ -211,7 +223,9 @@ def compare(
         prev_start, prev_end = _period_bounds(
             period, cur_start - timedelta(days=1), c, db_path
         )
-        current = period_stats(cur_start, cur_end, conn=c)
+        # Current period is to-date (capped at the anchor); the previous period
+        # is complete, so it is left uncapped.
+        current = period_stats(cur_start, cur_end, as_of=anchor, conn=c)
         previous = period_stats(prev_start, prev_end, conn=c)
 
     worked_diff = current.worked_minutes - previous.worked_minutes
@@ -239,20 +253,22 @@ def compare(
 def month_stats(
     in_month: str | date,
     *,
+    as_of: str | date | None = None,
     conn: sqlite3.Connection | None = None,
     db_path: Path | str | None = None,
 ) -> PeriodStats:
-    """Stats for the whole calendar month containing ``in_month``."""
+    """Stats for the month containing ``in_month`` (capped at ``as_of`` if set)."""
     first, last = cal.month_bounds(in_month)
-    return period_stats(first, last, conn=conn, db_path=db_path)
+    return period_stats(first, last, as_of=as_of, conn=conn, db_path=db_path)
 
 
 def week_stats(
     in_week: str | date,
     *,
+    as_of: str | date | None = None,
     conn: sqlite3.Connection | None = None,
     db_path: Path | str | None = None,
 ) -> PeriodStats:
-    """Stats for the week containing ``in_week`` (honours `week_start_day`)."""
+    """Stats for the week containing ``in_week`` (capped at ``as_of`` if set)."""
     first, last = cal.week_bounds(in_week, conn=conn, db_path=db_path)
-    return period_stats(first, last, conn=conn, db_path=db_path)
+    return period_stats(first, last, as_of=as_of, conn=conn, db_path=db_path)

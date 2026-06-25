@@ -3,6 +3,9 @@ backend/data/app.db
 backend/data/app.db-wal
 backend/data/app.db-shm
 
+# Work-Tracker service logs (created by deploy/install-services.ps1)
+/logs/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

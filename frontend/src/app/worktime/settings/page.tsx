@@ -1,6 +1,7 @@
 import Link from "next/link";
 
-import { Card } from "@/components/ui/card";
+import { HolidaySettings } from "@/components/modules/worktime/holiday-settings";
+import { TargetSettings } from "@/components/modules/worktime/target-settings";
 
 export default function WorktimeSettingsPage() {
   return (
@@ -20,11 +21,8 @@ export default function WorktimeSettingsPage() {
         </p>
       </div>
 
-      <Card className="p-6">
-        <p className="text-sm text-muted-foreground">
-          Target and holiday management arrives in a later step.
-        </p>
-      </Card>
+      <TargetSettings />
+      <HolidaySettings />
     </section>
   );
 }

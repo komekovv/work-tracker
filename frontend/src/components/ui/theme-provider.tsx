@@ -8,50 +8,77 @@ import {
   useState,
 } from "react";
 
-type Theme = "light" | "dark";
+type Preference = "light" | "dark" | "system";
+type Resolved = "light" | "dark";
 
 interface ThemeContextValue {
-  theme: Theme;
+  preference: Preference; // what the user chose
+  resolved: Resolved; // what is actually applied
+  setPreference: (preference: Preference) => void;
   toggle: () => void;
-  setTheme: (theme: Theme) => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 const STORAGE_KEY = "theme";
 
-function applyClass(theme: Theme): void {
+function systemTheme(): Resolved {
+  return window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
+}
+function resolve(pref: Preference): Resolved {
+  return pref === "system" ? systemTheme() : pref;
+}
+function applyClass(theme: Resolved): void {
   document.documentElement.classList.toggle("dark", theme === "dark");
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  // Server/first render assumes light; the no-flash script in the layout has
-  // already set the real class, and this effect syncs React state to it.
-  const [theme, setThemeState] = useState<Theme>("light");
+  const [preference, setPref] = useState<Preference>("system");
+  const [resolved, setResolved] = useState<Resolved>("light");
 
+  // Read the stored preference on mount (the no-flash script already set the
+  // class; this syncs React state to it).
   useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY) as Theme | null;
-    const initial =
-      stored ??
-      (window.matchMedia("(prefers-color-scheme: dark)").matches
-        ? "dark"
-        : "light");
-    setThemeState(initial);
-    applyClass(initial);
+    const stored = localStorage.getItem(STORAGE_KEY) as Preference | null;
+    const pref: Preference =
+      stored === "light" || stored === "dark" || stored === "system"
+        ? stored
+        : "system";
+    setPref(pref);
+    const r = resolve(pref);
+    setResolved(r);
+    applyClass(r);
   }, []);
 
-  const setTheme = useCallback((next: Theme) => {
-    setThemeState(next);
+  // While in "system" mode, follow OS theme changes live.
+  useEffect(() => {
+    if (preference !== "system") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => {
+      const r = systemTheme();
+      setResolved(r);
+      applyClass(r);
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [preference]);
+
+  const setPreference = useCallback((next: Preference) => {
+    setPref(next);
     localStorage.setItem(STORAGE_KEY, next);
-    applyClass(next);
+    const r = resolve(next);
+    setResolved(r);
+    applyClass(r);
   }, []);
 
   const toggle = useCallback(() => {
-    setTheme(theme === "dark" ? "light" : "dark");
-  }, [theme, setTheme]);
+    setPreference(resolved === "dark" ? "light" : "dark");
+  }, [resolved, setPreference]);
 
   return (
-    <ThemeContext.Provider value={{ theme, toggle, setTheme }}>
+    <ThemeContext.Provider value={{ preference, resolved, setPreference, toggle }}>
       {children}
     </ThemeContext.Provider>
   );
@@ -63,6 +90,6 @@ export function useTheme(): ThemeContextValue {
   return ctx;
 }
 
-// Inline script string for the layout: sets the `dark` class before paint to
-// avoid a flash of the wrong theme. Reads localStorage, falls back to the OS.
-export const NO_FLASH_SCRIPT = `(function(){try{var t=localStorage.getItem('${STORAGE_KEY}');if(!t){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.classList.toggle('dark',t==='dark');}catch(e){}})();`;
+// Pre-paint theme setter for the layout. Honours an explicit light/dark choice,
+// otherwise (missing or "system") follows the OS preference.
+export const NO_FLASH_SCRIPT = `(function(){try{var t=localStorage.getItem('${STORAGE_KEY}');var d;if(t==='dark'){d=true;}else if(t==='light'){d=false;}else{d=window.matchMedia('(prefers-color-scheme: dark)').matches;}document.documentElement.classList.toggle('dark',d);}catch(e){}})();`;
