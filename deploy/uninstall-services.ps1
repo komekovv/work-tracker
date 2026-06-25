@@ -14,17 +14,29 @@ param(
     [string]$Nssm = "nssm"
 )
 
-$ErrorActionPreference = "Continue"
+$ErrorActionPreference = "Stop"
 
 if (-not (Get-Command $Nssm -ErrorAction SilentlyContinue)) {
     throw "nssm not found. Put nssm.exe on PATH, or pass -Nssm <path>."
 }
 
+# Run nssm without letting its stderr abort the script.
+function Invoke-Nssm {
+    param([Parameter(ValueFromRemainingArguments = $true)] $NssmArgs)
+    $old = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $Nssm @NssmArgs 2>$null | Out-Null
+        return $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $old
+    }
+}
+
 foreach ($name in "WorkTrackerAPI", "WorkTrackerDetector") {
-    & $Nssm status $name 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-        & $Nssm stop $name 2>$null | Out-Null
-        & $Nssm remove $name confirm | Out-Null
+    if (Get-Service -Name $name -ErrorAction SilentlyContinue) {
+        Invoke-Nssm stop $name | Out-Null
+        Invoke-Nssm remove $name confirm | Out-Null
         Write-Host "Removed $name"
     } else {
         Write-Host "$name not installed; skipping"

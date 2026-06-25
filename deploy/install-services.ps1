@@ -42,24 +42,41 @@ if (-not (Test-Path $Python)) {
 }
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
+# Run nssm without letting its stderr abort the script. NSSM prints
+# informational/diagnostic text to stderr (e.g. "Can't open service!"), which
+# under ErrorActionPreference='Stop' would otherwise raise a NativeCommandError.
+function Invoke-Nssm {
+    param([Parameter(ValueFromRemainingArguments = $true)] $NssmArgs)
+    $old = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $Nssm @NssmArgs 2>$null | Out-Null
+        return $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $old
+    }
+}
+
 function Install-WtService {
     param([string]$Name, [string]$Params, [string]$LogPrefix)
 
-    # Idempotent: remove an existing service of the same name first.
-    & $Nssm status $Name 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-        & $Nssm stop $Name 2>$null | Out-Null
-        & $Nssm remove $Name confirm | Out-Null
+    # Idempotent: remove an existing service of the same name first. Use
+    # Get-Service (not nssm) so a missing service is a clean "not found".
+    if (Get-Service -Name $Name -ErrorAction SilentlyContinue) {
+        Invoke-Nssm stop $Name | Out-Null
+        Invoke-Nssm remove $Name confirm | Out-Null
     }
 
-    & $Nssm install $Name $Python | Out-Null
-    & $Nssm set $Name AppParameters $Params | Out-Null
-    & $Nssm set $Name AppDirectory $Repo | Out-Null
-    & $Nssm set $Name Start SERVICE_AUTO_START | Out-Null
-    & $Nssm set $Name AppStdout (Join-Path $LogDir "$LogPrefix.out.log") | Out-Null
-    & $Nssm set $Name AppStderr (Join-Path $LogDir "$LogPrefix.err.log") | Out-Null
-    & $Nssm set $Name AppRotateFiles 1 | Out-Null
-    & $Nssm set $Name AppExit Default Restart | Out-Null
+    $code = Invoke-Nssm install $Name $Python
+    if ($code -ne 0) { throw "nssm failed to install $Name (exit $code)." }
+
+    Invoke-Nssm set $Name AppParameters $Params | Out-Null
+    Invoke-Nssm set $Name AppDirectory $Repo | Out-Null
+    Invoke-Nssm set $Name Start SERVICE_AUTO_START | Out-Null
+    Invoke-Nssm set $Name AppStdout (Join-Path $LogDir "$LogPrefix.out.log") | Out-Null
+    Invoke-Nssm set $Name AppStderr (Join-Path $LogDir "$LogPrefix.err.log") | Out-Null
+    Invoke-Nssm set $Name AppRotateFiles 1 | Out-Null
+    Invoke-Nssm set $Name AppExit Default Restart | Out-Null
     Write-Host "Configured $Name"
 }
 
@@ -71,8 +88,8 @@ Install-WtService -Name "WorkTrackerDetector" `
     -Params "-m backend.modules.worktime.detector" `
     -LogPrefix "detector"
 
-& $Nssm start WorkTrackerAPI | Out-Null
-& $Nssm start WorkTrackerDetector | Out-Null
+Invoke-Nssm start WorkTrackerAPI | Out-Null
+Invoke-Nssm start WorkTrackerDetector | Out-Null
 
 Write-Host ""
 Write-Host "Done. Open the app at http://127.0.0.1:$Port"

@@ -45,6 +45,21 @@ everything they wrap:
 - The detector command was verified end-to-end in Phase 2 (boot/heartbeat/
   shutdown + crash recovery).
 
+## Fix (post-install-run)
+
+The user's first run hit `nssm.exe : Can't open service!` at the existence
+check. Root cause: `nssm status <missing>` writes to **stderr**, and under
+`$ErrorActionPreference = "Stop"` PowerShell promotes native stderr to a
+terminating error (even with `2>$null`). Fixed by:
+- checking existence with **`Get-Service -ErrorAction SilentlyContinue`** (not
+  `nssm status`), and
+- routing every `nssm` call through an **`Invoke-Nssm`** helper that runs it
+  under `ErrorActionPreference = "Continue"` with `2>$null`, returning the exit
+  code.
+Verified by simulating a stderr+exit-1 native command under `Stop` (no throw)
+and `Get-Service` on a missing service (clean empty result). The same helper was
+added to the uninstall script.
+
 ## Next
 
 Step 3 — README (prerequisites, setup, build, install/run services, verify,
