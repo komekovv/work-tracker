@@ -80,7 +80,8 @@ export default function WorktimePage() {
       mode: "edit",
       sessionId: s.id,
       start: s.start_time.slice(0, 16),
-      end: (s.end_time ?? s.start_time).slice(0, 16),
+      // Open sessions keep an empty end field (so saving leaves them open).
+      end: s.end_time ? s.end_time.slice(0, 16) : "",
     });
   };
   const refresh = () => {

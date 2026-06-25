@@ -14,10 +14,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ManualSessionIn(BaseModel):
-    """Request body for a manual clock-in/out (both ends required)."""
+    """Request body for a manual session.
+
+    Omit ``end_time`` (or send null) to create an open session (clock-in).
+    """
 
     start_time: datetime
-    end_time: datetime
+    end_time: datetime | None = None
 
 
 class SessionEditIn(BaseModel):

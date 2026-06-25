@@ -1,20 +1,22 @@
-"""Worktime detector — the service that turns power state into sessions.
+"""Worktime detector — turns computer power state into work sessions.
 
-Runs as a long-lived process (an NSSM service in Phase 7). Its life cycle:
+Runs as an NSSM Windows service. Lifecycle:
 
-1. **Boot** — ensure the schema exists, recover any orphan sessions left by a
-   crash, then open a fresh session. Orphan recovery runs *before* opening so
-   the new session is never mistaken for an orphan.
-2. **Heartbeat** — every `worktime.heartbeat_seconds` (a dynamic setting),
-   stamp `last_heartbeat` on the open session. This is what bounds the data loss
-   on an unclean shutdown to roughly one interval.
-3. **Shutdown** — on SIGINT / SIGTERM / SIGBREAK (Windows) or normal exit, close
-   the session cleanly. A lock + flag (and the DB-level guard in
-   `close_session`) make the close idempotent, so the signal handler, the loop's
-   `finally`, and the `atexit` backstop can all fire without double-closing.
+- **boot**: ensure the schema, recover any crash-orphaned session (closing it at
+  its *last heartbeat*, not now), then open a fresh session.
+- **run**: write a heartbeat every interval, so a hard power-off loses at most
+  one interval of time.
+- **stop**: on the service-stop signal (NSSM sends Ctrl+C/Break on stop and at
+  PC shutdown), **close the session and exit immediately, right in the signal
+  handler.**
 
-Run it with:  ``python -m backend.modules.worktime.detector``
-Optionally point it at a specific DB with the ``WORKTIME_DB_PATH`` env var.
+Deliberately **single-threaded**: the main thread sleeps in short ticks and the
+signal handler does the close + `sys.exit(0)` directly — no worker threads or
+event coordination that could delay or miss the shutdown write. This mirrors a
+pattern proven reliable under NSSM.
+
+Run with:  ``python -m backend.modules.worktime.detector``
+Point it at a specific DB with the ``WORKTIME_DB_PATH`` env var.
 """
 
 from __future__ import annotations
@@ -23,7 +25,9 @@ import atexit
 import logging
 import os
 import signal
+import sys
 import threading
+import time
 from pathlib import Path
 
 from backend.core import config
@@ -36,13 +40,15 @@ logger = logging.getLogger("worktime.detector")
 HEARTBEAT_SETTING = "worktime.heartbeat_seconds"
 DEFAULT_HEARTBEAT_SECONDS = 60
 
-# How often the main thread wakes to notice a shutdown signal. Short, so signals
-# are acted on promptly regardless of the heartbeat interval.
-_SIGNAL_POLL_SECONDS = 0.5
+# Main-loop granularity: the loop wakes this often to check the heartbeat timer.
+# Kept short (1s) so that even if a stop signal doesn't interrupt `time.sleep`
+# (Ctrl+Break doesn't on Windows; Ctrl+C does), the session still closes within
+# ~1s — well inside the PC-shutdown time budget.
+_TICK_SECONDS = 1
 
 
 class Detector:
-    """Owns one open session and the heartbeat loop around it."""
+    """Owns one open session and a simple heartbeat loop around it."""
 
     def __init__(
         self,
@@ -52,9 +58,8 @@ class Detector:
         self.db_path = Path(db_path) if db_path is not None else DB_PATH
         self._explicit_interval = heartbeat_seconds
         self.session_id: int | None = None
-        self._stop = threading.Event()
         self._closed = False
-        self._lock = threading.Lock()
+        self._lock = threading.Lock()  # guards the one-time close
 
     @property
     def heartbeat_seconds(self) -> int:
@@ -64,7 +69,6 @@ class Detector:
         value = config.get_int(
             HEARTBEAT_SETTING, DEFAULT_HEARTBEAT_SECONDS, db_path=self.db_path
         )
-        # Guard against a non-positive misconfiguration.
         return value if value and value > 0 else DEFAULT_HEARTBEAT_SECONDS
 
     # -- lifecycle ---------------------------------------------------------
@@ -93,52 +97,52 @@ class Detector:
                 return
             self._closed = True
             session_id = self.session_id
-        ok = models.close_session(session_id, db_path=self.db_path)
-        logger.info(
-            "Closed session %s (%s)", session_id, "ok" if ok else "already closed"
-        )
+        try:
+            models.close_session(session_id, db_path=self.db_path)
+            logger.info("Closed session %s", session_id)
+        except Exception:
+            logger.exception("Failed to close session %s", session_id)
 
     def run(self) -> None:
-        """Boot, then run until a stop signal, then close. Blocking."""
+        """Boot, then heartbeat until stopped. Blocking."""
         self.boot()
         self._install_signal_handlers()
-        atexit.register(self.close)  # backstop for paths that skip `finally`
+        atexit.register(self.close)  # backstop for any exit path
 
-        worker = threading.Thread(
-            target=self._heartbeat_loop, name="heartbeat", daemon=True
-        )
-        worker.start()
+        interval = self.heartbeat_seconds
         logger.info(
-            "Detector running (heartbeat every %ss). Ctrl+C to stop.",
-            self.heartbeat_seconds,
+            "Detector running (heartbeat every %ss). Stop the service to close.",
+            interval,
         )
+        next_beat = time.monotonic() + interval
         try:
-            # Poll in short slices so signal handlers are serviced promptly.
-            while not self._stop.wait(_SIGNAL_POLL_SECONDS):
-                pass
+            while True:
+                time.sleep(_TICK_SECONDS)
+                if time.monotonic() >= next_beat:
+                    try:
+                        models.update_heartbeat(self.session_id, db_path=self.db_path)
+                    except Exception:  # never let a transient DB error kill the loop
+                        logger.exception(
+                            "heartbeat failed for session %s", self.session_id
+                        )
+                    next_beat = time.monotonic() + interval
         finally:
-            self._stop.set()
-            worker.join(timeout=self.heartbeat_seconds + 1)
+            # Normal-exit backstop; the signal handler usually closes first.
             self.close()
 
-    # -- internals ---------------------------------------------------------
+    # -- signal handling ---------------------------------------------------
 
-    def _heartbeat_loop(self) -> None:
-        """Stamp the heartbeat each interval until stopped."""
-        while not self._stop.wait(self.heartbeat_seconds):
-            try:
-                models.update_heartbeat(self.session_id, db_path=self.db_path)
-                logger.debug("heartbeat for session %s", self.session_id)
-            except Exception:  # never let a transient DB error kill the loop
-                logger.exception("heartbeat failed for session %s", self.session_id)
-
-    def _on_signal(self, signum, _frame) -> None:
-        logger.info("Received signal %s; shutting down", signum)
-        self._stop.set()
+    def _on_signal(self, signum, _frame=None) -> None:
+        """Close the session and exit immediately (runs in the main thread)."""
+        logger.info(
+            "Received stop signal %s; closing session %s", signum, self.session_id
+        )
+        self.close()
+        sys.exit(0)
 
     def _install_signal_handlers(self) -> None:
-        # SIGBREAK exists only on Windows; SIGTERM/SIGINT everywhere. Installing
-        # must happen on the main thread, so failures are tolerated.
+        # SIGBREAK is Windows-only; SIGTERM/SIGINT everywhere. NSSM's stop sends
+        # a console Ctrl+C / Ctrl+Break which arrive as these signals.
         for name in ("SIGINT", "SIGTERM", "SIGBREAK"):
             sig = getattr(signal, name, None)
             if sig is None:

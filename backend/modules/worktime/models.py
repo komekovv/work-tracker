@@ -366,18 +366,23 @@ def find_overlapping(
 
 def create_session(
     start: datetime,
-    end: datetime,
+    end: datetime | None = None,
     *,
     source: str = "manual",
     conn: sqlite3.Connection | None = None,
     db_path: Path | str | None = None,
 ) -> int:
-    """Insert a fully-specified (closed) session and return its id.
+    """Insert a manual session and return its id.
 
-    Used for manual clock-in/out. Caller is responsible for overlap checks
-    (see :func:`find_overlapping`).
+    ``end`` may be ``None`` to create an **open** session (a manual clock-in with
+    no end yet) — `end_time`/`duration_minutes` stay NULL. Caller is responsible
+    for overlap checks (see :func:`find_overlapping`).
     """
-    start_iso, end_iso = _iso(start), _iso(end)
+    start_iso = _iso(start)
+    end_iso = _iso(end) if end is not None else None
+    duration = (
+        duration_minutes_between(start_iso, end_iso) if end_iso is not None else None
+    )
     with optional_connection(conn, db_path) as c:
         cur = c.execute(
             """
@@ -389,12 +394,24 @@ def create_session(
                 start.date().isoformat(),
                 start_iso,
                 end_iso,
-                duration_minutes_between(start_iso, end_iso),
+                duration,
                 1 if cal.is_sunday(start.date()) else 0,
                 source,
             ),
         )
         return int(cur.lastrowid)
+
+
+def delete_session(
+    session_id: int,
+    *,
+    conn: sqlite3.Connection | None = None,
+    db_path: Path | str | None = None,
+) -> bool:
+    """Delete a session by id. Returns True if a row was removed."""
+    with optional_connection(conn, db_path) as c:
+        cur = c.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+        return cur.rowcount > 0
 
 
 def edit_session(

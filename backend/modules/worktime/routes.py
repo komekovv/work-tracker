@@ -174,12 +174,17 @@ def create_manual_session(
     payload: ManualSessionIn,
     db_path: Path = Depends(get_db_path),
 ) -> SessionOut:
-    """Add a manual session (clock-in/out). Rejects overlaps (B6) with 409."""
-    if payload.start_time >= payload.end_time:
+    """Add a manual session. Omit end_time for an open session (clock-in).
+
+    Rejects overlaps (B6) with 409.
+    """
+    if payload.end_time is not None and payload.start_time >= payload.end_time:
         raise HTTPException(status_code=422, detail="start_time must be before end_time")
     with core_db.connection(db_path) as conn:
+        # An open session extends to +∞ for overlap purposes.
+        overlap_end = payload.end_time or datetime.max.replace(microsecond=0)
         conflicts = models.find_overlapping(
-            payload.start_time, payload.end_time, conn=conn
+            payload.start_time, overlap_end, conn=conn
         )
         if conflicts:
             raise HTTPException(status_code=409, detail=_conflict_detail(conflicts))
@@ -188,6 +193,17 @@ def create_manual_session(
         )
         created = models.get_session(session_id, conn=conn)
     return SessionOut.model_validate(created)
+
+
+@router.delete("/sessions/{session_id}", status_code=204)
+def delete_session(
+    session_id: int,
+    db_path: Path = Depends(get_db_path),
+) -> Response:
+    """Delete a session by id; 404 if it doesn't exist."""
+    if not models.delete_session(session_id, db_path=db_path):
+        raise HTTPException(status_code=404, detail="Session not found")
+    return Response(status_code=204)
 
 
 @router.patch("/sessions/{session_id}", response_model=SessionOut)
