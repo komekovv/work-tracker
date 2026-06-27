@@ -5,13 +5,19 @@ import Link from "next/link";
 
 import { CalendarGrid } from "@/components/modules/worktime/calendar-grid";
 import { DayPanel } from "@/components/modules/worktime/day-panel";
+import { PeriodSummaryPanel } from "@/components/modules/worktime/period-summary-panel";
 import {
   SessionFormModal,
   type SessionFormState,
 } from "@/components/modules/worktime/session-form-modal";
+import {
+  SidePanelTabs,
+  type SidePanelTab,
+} from "@/components/modules/worktime/side-panel-tabs";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/error-state";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getCalendar, getSessions } from "@/lib/api";
 import { formatMonth } from "@/lib/format";
@@ -47,6 +53,13 @@ export default function WorktimePage() {
 
   const cal = useApi(() => getCalendar(month), [month]);
   const sess = useApi(() => getSessions(from, to), [month]);
+
+  // Right-panel view: per-day (calendar-driven) or a range summary.
+  const [tab, setTab] = useState<SidePanelTab>("day");
+  const [cFrom, setCFrom] = useState("");
+  const [cTo, setCTo] = useState("");
+  // Bumped on session add/edit so the summary panel re-fetches too.
+  const [reloadToken, setReloadToken] = useState(0);
 
   const [form, setForm] = useState<SessionFormState>({
     open: false,
@@ -87,6 +100,7 @@ export default function WorktimePage() {
   const refresh = () => {
     cal.reload();
     sess.reload();
+    setReloadToken((n) => n + 1);
   };
 
   return (
@@ -148,12 +162,56 @@ export default function WorktimePage() {
           )}
         </Card>
 
-        <div className="lg:sticky lg:top-20 lg:self-start">
-          <DayPanel
-            day={selectedDay}
-            sessions={selectedSessions}
-            onEdit={openEdit}
-          />
+        <div className="space-y-3 lg:sticky lg:top-20 lg:self-start">
+          <SidePanelTabs value={tab} onChange={setTab} />
+
+          {tab === "custom" && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                type="date"
+                aria-label="From date"
+                value={cFrom}
+                max={cTo || undefined}
+                onChange={(e) => setCFrom(e.target.value)}
+                className="w-auto"
+              />
+              <span className="text-sm text-muted-foreground">to</span>
+              <Input
+                type="date"
+                aria-label="To date"
+                value={cTo}
+                min={cFrom || undefined}
+                onChange={(e) => setCTo(e.target.value)}
+                className="w-auto"
+              />
+            </div>
+          )}
+
+          {tab === "day" ? (
+            <DayPanel
+              day={selectedDay}
+              sessions={selectedSessions}
+              onEdit={openEdit}
+            />
+          ) : tab === "week" ? (
+            <PeriodSummaryPanel
+              period="week"
+              anchor={selected ?? todayISO()}
+              reloadToken={reloadToken}
+            />
+          ) : tab === "month" ? (
+            <PeriodSummaryPanel
+              period="month"
+              anchor={`${month}-01`}
+              reloadToken={reloadToken}
+            />
+          ) : (
+            <PeriodSummaryPanel
+              from={cFrom}
+              to={cTo}
+              reloadToken={reloadToken}
+            />
+          )}
         </div>
       </div>
 

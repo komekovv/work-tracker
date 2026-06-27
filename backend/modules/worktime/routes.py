@@ -107,6 +107,36 @@ def stats(
     )
 
 
+@router.get("/summary", response_model=PeriodStatsOut)
+def summary(
+    period: Literal["week", "month"] = "month",
+    anchor: date | None = None,
+    frm: date | None = Query(None, alias="from"),
+    to: date | None = None,
+    as_of: date | None = None,
+    db_path: Path = Depends(get_db_path),
+) -> PeriodStatsOut:
+    """Aggregate stats for a range — week/month around ``anchor`` or custom ``from``/``to``.
+
+    Unlike ``/stats``, the range (``period`` + ``anchor``, or ``from``/``to``) is
+    chosen independently from ``as_of`` (default today), which only caps the
+    *current* period to-date — so a **past** month/week returns its full range.
+    """
+    asof = as_of or date.today()
+    with core_db.connection(db_path) as conn:
+        if frm is not None or to is not None:
+            if frm is None or to is None:
+                raise HTTPException(status_code=422, detail="both from and to are required")
+            if frm > to:
+                raise HTTPException(status_code=422, detail="from must be on/before to")
+            result = kpi.period_stats(frm, to, as_of=asof, conn=conn)
+        elif period == "week":
+            result = kpi.week_stats(anchor or asof, as_of=asof, conn=conn)
+        else:
+            result = kpi.month_stats(anchor or asof, as_of=asof, conn=conn)
+    return PeriodStatsOut.model_validate(result)
+
+
 @router.get("/debt", response_model=DebtOut)
 def debt(
     period: Literal["week", "month"] = "month",

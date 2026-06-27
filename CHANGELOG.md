@@ -4,6 +4,20 @@ Notable changes to the Work-Time & KPI Tracker. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). Per-step build notes live in
 [`docs/steps/`](docs/steps/).
 
+## 2026-06-27 — Worktime page: Week / Month / Custom summary tabs
+
+Full details: [`docs/steps/post-release-worktime-summary-tabs.md`](docs/steps/post-release-worktime-summary-tabs.md).
+
+### Added
+- **Day / Week / Month / Custom tabs** on the Worktime page's side panel. *Day*
+  keeps the per-day view; *Week / Month / Custom* show aggregate stats (worked,
+  target, over/under, completion %, bonus, days met) for the range. Month follows
+  the calendar's viewed month; Week follows the selected day; Custom takes a date range.
+- **`GET /api/worktime/summary`** (`period=week|month&anchor=` or `from`/`to`,
+  optional `as_of`) returning `PeriodStatsOut`. Unlike `/stats`, it picks the range
+  independently of the to-date cap, so a **past** month/week returns its full range
+  while the current one stays to-date.
+
 ## 2026-06-27 — Debt / hours-owed dashboard card
 
 Full details: [`docs/steps/post-release-debt-feature.md`](docs/steps/post-release-debt-feature.md).

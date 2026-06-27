@@ -12,6 +12,7 @@ import type {
   Kpi,
   ManualSessionIn,
   PeriodKind,
+  PeriodStats,
   SessionEditIn,
   SessionOut,
   Settings,
@@ -81,6 +82,23 @@ export const getStats = (period: PeriodKind, asOf?: string, n?: number) =>
 
 export const getKpi = (asOf?: string) =>
   request<Kpi>(withQuery("/api/worktime/kpi", { as_of: asOf }));
+
+export const getSummary = (params: {
+  period?: PeriodKind;
+  anchor?: string;
+  from?: string;
+  to?: string;
+  asOf?: string;
+}) =>
+  request<PeriodStats>(
+    withQuery("/api/worktime/summary", {
+      period: params.period,
+      anchor: params.anchor,
+      from: params.from,
+      to: params.to,
+      as_of: params.asOf,
+    }),
+  );
 
 export const getDebt = (params: {
   period?: PeriodKind;
