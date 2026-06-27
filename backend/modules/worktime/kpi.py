@@ -272,3 +272,154 @@ def week_stats(
     """Stats for the week containing ``in_week`` (capped at ``as_of`` if set)."""
     first, last = cal.week_bounds(in_week, conn=conn, db_path=db_path)
     return period_stats(first, last, as_of=as_of, conn=conn, db_path=db_path)
+
+
+# ===========================================================================
+# Debt / hours owed
+# ===========================================================================
+
+
+@dataclass(frozen=True)
+class DebtStats:
+    """How far behind (or ahead) a range is, and what it would take to catch up.
+
+    Answers "how many hours do I still owe?" for a range. All durations are in
+    minutes. The range is split at ``as_of``:
+
+    - **Completed** days ``[start, as_of - 1]`` feed the debt. Today is excluded
+      so an in-progress day can't read as a no-show mid-morning.
+    - **Remaining** days ``[as_of, end]`` feed the forward-looking projection.
+
+    ``over_under_minutes`` is the net (negative = debt, positive = surplus) over
+    counted days, and it **reconciles exactly** with the three signed breakdown
+    buckets: ``no_show_minutes + under_minutes + surplus_minutes``. Each counted
+    day lands in exactly one bucket (or none, when worked == target).
+    """
+
+    start: str
+    end: str
+    as_of: str
+    debt_end: str           # last completed day folded into the debt
+    remaining_start: str    # first day folded into the remaining projection
+
+    # Debt over completed counted days (non-bonus, target > 0).
+    target_minutes: int
+    worked_minutes: int
+    over_under_minutes: int  # worked - target; negative = debt, positive = surplus
+    days_counted: int
+    days_met: int
+
+    # Why short — signed buckets that sum to over_under_minutes.
+    no_show_minutes: int     # days with target but zero worked (all negative)
+    no_show_days: int
+    under_minutes: int       # came in but under target (negative)
+    under_days: int
+    surplus_minutes: int     # came in over target (positive credit)
+    surplus_days: int
+
+    # What's left in the range, and the pace needed to clear the debt.
+    remaining_work_days: int
+    remaining_target_minutes: int
+    outstanding_minutes: int            # debt still owed (>= 0); 0 when ahead
+    catch_up_per_day_minutes: int | None  # outstanding spread over remaining days
+    avg_needed_per_day_minutes: int | None  # remaining target + catch-up, per day
+
+
+def debt_stats(
+    start: str | date,
+    end: str | date,
+    *,
+    as_of: str | date | None = None,
+    conn: sqlite3.Connection | None = None,
+    db_path: Path | str | None = None,
+) -> DebtStats:
+    """Compute debt/surplus + breakdown + remaining projection for a range.
+
+    Reuses `calc.compute_day` (live, read-only) so historical/per-weekday targets
+    (A1–A4) and bonus days (Sunday/holiday/leave/vacation → target 0, C1–C5) are
+    honored automatically; bonus never offsets debt (D4). An empty or target-less
+    range returns zeros with `None` catch-up rather than raising (D1).
+    """
+    start_d = cal.to_date(start)
+    end_d = cal.to_date(end)
+    anchor = cal.to_date(as_of) if as_of is not None else date.today()
+
+    # Today is "remaining", so the debt covers only days that are over.
+    debt_end_d = min(end_d, anchor - timedelta(days=1))
+    remaining_start_d = max(start_d, anchor)
+
+    target_total = 0
+    worked_total = 0
+    days_counted = 0
+    days_met = 0
+    no_show_min = 0
+    no_show_days = 0
+    under_min = 0
+    under_days = 0
+    surplus_min = 0
+    surplus_days = 0
+    remaining_work_days = 0
+    remaining_target_min = 0
+
+    with optional_connection(conn, db_path) as c:
+        # Completed range → debt + breakdown.
+        for day in cal.iter_days(start_d, debt_end_d):
+            r = calc.compute_day(day, conn=c)
+            if r.target_met is None or r.target_minutes <= 0:
+                continue  # bonus day or no requirement — not counted
+            days_counted += 1
+            target_total += r.target_minutes
+            worked_total += r.worked_minutes
+            if r.target_met:
+                days_met += 1
+            if r.worked_minutes == 0:
+                no_show_min += r.over_under_minutes  # == -target
+                no_show_days += 1
+            elif r.worked_minutes < r.target_minutes:
+                under_min += r.over_under_minutes  # negative
+                under_days += 1
+            elif r.worked_minutes > r.target_minutes:
+                surplus_min += r.over_under_minutes  # positive credit
+                surplus_days += 1
+            # worked == target → met exactly, no bucket
+
+        # Remaining range → forward-looking projection.
+        for day in cal.iter_days(remaining_start_d, end_d):
+            r = calc.compute_day(day, conn=c)
+            if r.target_met is None or r.target_minutes <= 0:
+                continue  # bonus / no requirement — nothing to owe ahead
+            remaining_work_days += 1
+            remaining_target_min += r.target_minutes
+
+    over_under = worked_total - target_total
+    outstanding = max(0, -over_under)
+    if remaining_work_days > 0:
+        catch_up = round(outstanding / remaining_work_days)
+        avg_needed = round((remaining_target_min + outstanding) / remaining_work_days)
+    else:
+        catch_up = None
+        avg_needed = None
+
+    return DebtStats(
+        start=start_d.isoformat(),
+        end=end_d.isoformat(),
+        as_of=anchor.isoformat(),
+        debt_end=debt_end_d.isoformat(),
+        remaining_start=remaining_start_d.isoformat(),
+        target_minutes=target_total,
+        worked_minutes=worked_total,
+        over_under_minutes=over_under,
+        days_counted=days_counted,
+        days_met=days_met,
+        no_show_minutes=no_show_min,
+        no_show_days=no_show_days,
+        under_minutes=under_min,
+        under_days=under_days,
+        surplus_minutes=surplus_min,
+        surplus_days=surplus_days,
+        remaining_work_days=remaining_work_days,
+        remaining_target_minutes=remaining_target_min,
+        outstanding_minutes=outstanding,
+        catch_up_per_day_minutes=catch_up,
+        avg_needed_per_day_minutes=avg_needed,
+    )

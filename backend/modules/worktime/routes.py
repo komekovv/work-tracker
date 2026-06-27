@@ -22,6 +22,7 @@ from backend.modules.worktime.schemas import (
     CalendarOut,
     ComparisonOut,
     DayResultOut,
+    DebtOut,
     KpiOut,
     ManualSessionIn,
     PeriodStatsOut,
@@ -104,6 +105,37 @@ def stats(
         stats=PeriodStatsOut.model_validate(current),
         trend=[PeriodStatsOut.model_validate(p) for p in trend],
     )
+
+
+@router.get("/debt", response_model=DebtOut)
+def debt(
+    period: Literal["week", "month"] = "month",
+    frm: date | None = Query(None, alias="from"),
+    to: date | None = None,
+    as_of: date | None = None,
+    db_path: Path = Depends(get_db_path),
+) -> DebtOut:
+    """Hours owed for a range: net debt/surplus, why-short breakdown, catch-up.
+
+    Supply ``from`` and ``to`` for a custom range, or ``period`` (week|month) for
+    the period containing ``as_of`` (default today). Debt covers completed days
+    only; today and beyond feed the remaining projection.
+    """
+    anchor = as_of or date.today()
+    if frm is not None or to is not None:
+        if frm is None or to is None:
+            raise HTTPException(status_code=422, detail="both from and to are required")
+        if frm > to:
+            raise HTTPException(status_code=422, detail="from must be on/before to")
+        start, end = frm, to
+    elif period == "week":
+        start, end = cal.week_bounds(anchor, db_path=db_path)
+    else:
+        start, end = cal.month_bounds(anchor)
+
+    with core_db.connection(db_path) as conn:
+        result = kpi.debt_stats(start, end, as_of=anchor, conn=conn)
+    return DebtOut.model_validate(result)
 
 
 @router.get("/kpi", response_model=KpiOut)

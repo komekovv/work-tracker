@@ -102,6 +102,34 @@ class PeriodStatsOut(BaseModel):
     average_worked_minutes: float | None
 
 
+class DebtOut(BaseModel):
+    """How far behind/ahead a range is, with breakdown and catch-up projection."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    start: str
+    end: str
+    as_of: str
+    debt_end: str
+    remaining_start: str
+    target_minutes: int
+    worked_minutes: int
+    over_under_minutes: int
+    days_counted: int
+    days_met: int
+    no_show_minutes: int
+    no_show_days: int
+    under_minutes: int
+    under_days: int
+    surplus_minutes: int
+    surplus_days: int
+    remaining_work_days: int
+    remaining_target_minutes: int
+    outstanding_minutes: int
+    catch_up_per_day_minutes: int | None
+    avg_needed_per_day_minutes: int | None
+
+
 class ComparisonOut(BaseModel):
     """Period-over-period comparison."""
 

@@ -28,8 +28,11 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Anchored to repo root: these are Python packaging build dirs. Unanchored
+# `lib/` also matched `frontend/src/lib/` and silently ignored the frontend
+# source (api client, types, hooks) — keep them anchored so it doesn't recur.
+/lib/
+/lib64/
 parts/
 sdist/
 var/

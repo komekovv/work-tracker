@@ -4,6 +4,20 @@ Notable changes to the Work-Time & KPI Tracker. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/). Per-step build notes live in
 [`docs/steps/`](docs/steps/).
 
+## 2026-06-27 — Debt / hours-owed dashboard card
+
+Full details: [`docs/steps/post-release-debt-feature.md`](docs/steps/post-release-debt-feature.md).
+
+### Added
+- **"Hours owed" dashboard card** answering how far behind/ahead you are for this
+  week, this month, or a custom date range — with a reconciling *why-short*
+  breakdown (didn't come in / came in under / surplus credit), work days left, and
+  the daily pace needed to catch up.
+- **`GET /api/worktime/debt`** (`period=week|month` or `from`/`to`, plus `as_of`) —
+  net debt/surplus, breakdown, and remaining projection. Debt counts completed days
+  only; today and beyond feed the projection. Built on the existing live calc layer,
+  so historical targets and bonus days (leave/vacation/holiday/Sunday) are honored.
+
 ## 2026-06-25 — Post-release hardening & features
 
 Full details: [`docs/steps/post-release-changes.md`](docs/steps/post-release-changes.md).

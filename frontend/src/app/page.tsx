@@ -1,5 +1,6 @@
 "use client";
 
+import { DebtCard } from "@/components/modules/worktime/debt-card";
 import { Heatmap } from "@/components/modules/worktime/heatmap";
 import { KpiCards } from "@/components/modules/worktime/kpi-cards";
 import { TodayCard } from "@/components/modules/worktime/today-card";
@@ -52,6 +53,7 @@ export default function Home() {
         <div className="space-y-4">
           {today.data && <TodayCard today={today.data} />}
           {kpi.data && <KpiCards kpi={kpi.data} />}
+          <DebtCard />
           <div className="grid gap-4 lg:grid-cols-2">
             <Heatmap />
             <TrendChart />
