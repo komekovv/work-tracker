@@ -104,10 +104,13 @@ class Detector:
             logger.exception("Failed to close session %s", session_id)
 
     def run(self) -> None:
-        """Boot, then heartbeat until stopped. Blocking."""
-        self.boot()
+        """Boot (with retry), then heartbeat until stopped. Blocking."""
+        # Install handlers first so the service can be stopped cleanly even
+        # while still retrying boot.
         self._install_signal_handlers()
         atexit.register(self.close)  # backstop for any exit path
+
+        self._boot_with_retry()
 
         interval = self.heartbeat_seconds
         logger.info(
@@ -129,6 +132,32 @@ class Detector:
         finally:
             # Normal-exit backstop; the signal handler usually closes first.
             self.close()
+
+    def _boot_with_retry(self) -> None:
+        """Open the session, retrying transient startup failures.
+
+        At PC boot the API service may be initialising the **same** SQLite file
+        at the same moment, which can briefly lock it. Rather than crash (and let
+        NSSM throttle-restart us into a Paused state), we retry until boot
+        succeeds. Staying alive in this loop also means NSSM sees the process as
+        running, not failing. The signal handlers installed before this allow a
+        clean stop mid-retry.
+        """
+        delay = 2
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                self.boot()
+                return
+            except Exception:
+                logger.exception(
+                    "Boot attempt %d failed (DB busy at startup?); retrying in %ss",
+                    attempt,
+                    delay,
+                )
+                time.sleep(delay)
+                delay = min(delay * 2, 30)  # backoff, capped
 
     # -- signal handling ---------------------------------------------------
 

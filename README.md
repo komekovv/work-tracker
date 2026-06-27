@@ -153,9 +153,26 @@ logs/detector.out.log   logs/detector.err.log
 
 - The **detector** opens a session on boot, writes a heartbeat each interval, and
   closes the session on shutdown. After a crash/power-loss it recovers the
-  orphaned session at its **last heartbeat** (≈1-minute error cap).
+  orphaned session at its **last heartbeat** (≈1-minute error cap). Its boot is
+  retried if the database is briefly busy (the API may be initialising it at the
+  same moment on startup).
 - **Targets** are historical: a daily target effective from a date, with optional
   per-weekday "short day" overrides; past days keep their old target.
 - **Day types** (holiday / leave / vacation) and Sundays turn worked hours into
   **bonus** (counted separately from target completion). Current-month
   completion is **month-to-date**.
+
+## Managing sessions and settings (in the app)
+
+- **Worktime page → calendar:** click a day to see its sessions.
+  - **Add session** (manual): set a Start and End. Leave **End empty** to create
+    an **open session** (clock-in) with no end yet.
+  - **Edit / Delete:** the ✎ on a session opens a form to change its times or
+    **Delete** it (two-click confirm). Overlapping sessions are rejected.
+- **Worktime → Targets & holidays:** add/remove target rules (daily, per-weekday)
+  and mark holidays / leave / vacation.
+- **Settings:** theme (light / dark / system) and the dynamic settings stored in
+  the database.
+
+Note: in production the detector is the source of automatic sessions; manual
+add/edit/delete is for fixing gaps (e.g. a crash day or a forgotten clock-out).
