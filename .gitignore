@@ -9,6 +9,9 @@ backend/data/app.db-shm
 # Work-Tracker DB backups
 backend/data/backups/
 
+# Local Claude Code project guidance (root only; not frontend/CLAUDE.md)
+/CLAUDE.md
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
